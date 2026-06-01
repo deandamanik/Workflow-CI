@@ -1,0 +1,62 @@
+name: Model CI Retraining and Docker Build
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  ci_pipeline:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout Repository
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.12'
+
+    - name: Install Dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install pandas scikit-learn mlflow dagshub
+
+    - name: Run MLflow Project (Re-training Model)
+      env:
+        DAGSHUB_USERNAME: "deandamanik"
+        DAGSHUB_TOKEN: ${{ secrets.DAGSHUB_TOKEN }}
+        MLFLOW_TRACKING_URI: "https://dagshub.com/deandamanik/Eksperimen_SML_Dean-Ivan-Ryando-Damanik.mlflow"
+        MLFLOW_TRACKING_USERNAME: "deandamanik"
+        MLFLOW_TRACKING_PASSWORD: ${{ secrets.DAGSHUB_TOKEN }}
+        MLFLOW_EXPERIMENT_NAME: "Tokopedia_Sentiment_CI_Automation"
+      run: |
+        mlflow run MLProject --env-manager local
+
+    - name: Verify model_output exists
+      run: |
+        ls -la model_output/
+        cat model_output/MLmodel
+
+    - name: Upload Trained Model Artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: trained-model-artifacts
+        path: model_output/
+
+    - name: Log in to Docker Hub
+      uses: docker/login-action@v3
+      with:
+        username: ${{ secrets.DOCKERHUB_USERNAME }}
+        password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+    - name: Build and Push MLflow Docker Image
+      run: |
+        mlflow models build-docker \
+          -m model_output/ \
+          -n "${{ secrets.DOCKERHUB_USERNAME }}/tokopedia-sentiment-model:latest" \
+          --env-manager local
+        
+        docker push "${{ secrets.DOCKERHUB_USERNAME }}/tokopedia-sentiment-model:latest"
